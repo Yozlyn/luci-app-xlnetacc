@@ -1,0 +1,106 @@
+name: Manual IPK Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_url:
+        description: OpenWrt SDK download URL
+        required: false
+        default: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+      release_tag:
+        description: Tag name for the release (auto-generated if empty)
+        required: false
+      release_name:
+        description: Release title (auto-generated if empty)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison gawk gettext \
+            libncurses5-dev libssl-dev python3-distutils python3-setuptools \
+            rsync unzip wget
+
+      - name: Download OpenWrt SDK
+        run: |
+          SDK_URL="${{ github.event.inputs.sdk_url }}"
+          [ -z "$SDK_URL" ] && SDK_URL="https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+          mkdir -p /tmp/sdk
+          cd /tmp/sdk
+          wget -q "$SDK_URL" -O sdk.tar.xz
+          tar xf sdk.tar.xz
+          sdk_dir=$(find . -maxdepth 1 -type d -name "openwrt-sdk*" | head -n 1)
+          echo "SDK_DIR=/tmp/sdk/$sdk_dir" >> $GITHUB_ENV
+
+      - name: Prepare feeds
+        run: |
+          cd "$SDK_DIR"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Add luci-app-xlnetacc package
+        run: |
+          cd "$SDK_DIR"
+          ln -s "$GITHUB_WORKSPACE" package/luci-app-xlnetacc
+          echo "CONFIG_PACKAGE_luci-app-xlnetacc=m" > .config
+          make defconfig
+
+      - name: Build IPK
+        run: |
+          cd "$SDK_DIR"
+          make package/luci-app-xlnetacc/compile -j$(nproc) V=s
+          find bin/packages -name "luci-app-xlnetacc*.ipk" -print > /tmp/ipk_list
+          cat /tmp/ipk_list
+          ipk_path=$(head -n 1 /tmp/ipk_list)
+          if [ -z "$ipk_path" ]; then
+            echo "IPK not found"
+            exit 1
+          fi
+          echo "IPK_PATH=$ipk_path" >> $GITHUB_ENV
+          echo "IPK_NAME=$(basename "$ipk_path")" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-xlnetacc-ipk
+          path: ${{ env.IPK_PATH }}
+
+      - name: Set release variables
+        run: |
+          rel_tag="${{ github.event.inputs.release_tag }}"
+          rel_name="${{ github.event.inputs.release_name }}"
+          [ -z "$rel_tag" ] && rel_tag="ipk-build-${GITHUB_RUN_NUMBER}"
+          [ -z "$rel_name" ] && rel_name="Manual IPK build ${GITHUB_RUN_NUMBER}"
+          echo "REL_TAG=$rel_tag" >> $GITHUB_ENV
+          echo "REL_NAME=$rel_name" >> $GITHUB_ENV
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.REL_TAG }}
+          release_name: ${{ env.REL_NAME }}
+          draft: false
+          prerelease: false
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.IPK_PATH }}
+          asset_name: ${{ env.IPK_NAME }}
+          asset_content_type: application/octet-stream
