@@ -61,7 +61,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Add luci-app-xlnetacc package
+      - name: Add package
         run: |
           cd "$SDK_DIR"
           mkdir -p "package/$PKG_NAME"
@@ -85,7 +85,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-xlnetacc-ipk
+          name: ${{ env.PKG_NAME }}-ipk
           path: ${{ env.IPK_PATH }}
 
       - name: Set release variables
