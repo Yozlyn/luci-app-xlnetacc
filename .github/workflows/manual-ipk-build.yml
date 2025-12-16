@@ -39,7 +39,7 @@ jobs:
         run: |
           SDK_URL="${{ github.event.inputs.sdk_url }}"
           case "$SDK_URL" in
-            https://downloads.openwrt.org/*|http://downloads.openwrt.org/*) ;;
+            https://downloads.openwrt.org/*) ;;
             *)
               echo "Invalid SDK URL: $SDK_URL"
               exit 1
@@ -66,7 +66,7 @@ jobs:
           pkg="${{ github.event.inputs.package_name }}"
           [ -z "$pkg" ] && pkg="luci-app-xlnetacc"
           case "$pkg" in
-            *[^A-Za-z0-9._-]*|"")
+            *[^A-Za-z0-9._-]*)
               echo "Invalid package name: $pkg"
               exit 1
               ;;
@@ -101,7 +101,7 @@ jobs:
         run: |
           cd "$SDK_DIR"
           make package/$PKG_NAME/compile -j$(nproc) V=s
-          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}*.ipk" -print)
+          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}_*.ipk" -print)
           match_count=${#ipk_array[@]}
           if [ "$match_count" -eq 0 ]; then
             echo "IPK not found"
@@ -110,11 +110,9 @@ jobs:
           if [ "$match_count" -gt 1 ]; then
             echo "Multiple IPKs found:"
             printf '%s\n' "${ipk_array[@]}"
-            ipk_path="${ipk_array[0]}"
-            echo "Using first: $ipk_path"
-          else
-            ipk_path="${ipk_array[0]}"
+            echo "Using first: ${ipk_array[0]}"
           fi
+          ipk_path="${ipk_array[0]}"
           echo "Found IPK: $ipk_path"
           echo "IPK_PATH=$ipk_path" >> $GITHUB_ENV
           echo "IPK_NAME=$(basename "$ipk_path")" >> $GITHUB_ENV
