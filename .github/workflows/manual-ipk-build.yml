@@ -51,7 +51,8 @@ jobs:
       - name: Add luci-app-xlnetacc package
         run: |
           cd "$SDK_DIR"
-          ln -s "$GITHUB_WORKSPACE" package/luci-app-xlnetacc
+          mkdir -p package/luci-app-xlnetacc
+          rsync -a --delete --exclude ".git" "$GITHUB_WORKSPACE/" package/luci-app-xlnetacc/
           echo "CONFIG_PACKAGE_luci-app-xlnetacc=m" > .config
           make defconfig
 
@@ -84,23 +85,10 @@ jobs:
           echo "REL_TAG=$rel_tag" >> $GITHUB_ENV
           echo "REL_NAME=$rel_name" >> $GITHUB_ENV
 
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Publish release asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.REL_TAG }}
-          release_name: ${{ env.REL_NAME }}
-          draft: false
-          prerelease: false
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ env.IPK_PATH }}
-          asset_name: ${{ env.IPK_NAME }}
-          asset_content_type: application/octet-stream
+        run: |
+          gh release view "$REL_TAG" >/dev/null 2>&1 || \
+            gh release create "$REL_TAG" --title "$REL_NAME" --notes "Automated IPK build."
+          gh release upload "$REL_TAG" "$IPK_PATH" --clobber
