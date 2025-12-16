@@ -49,12 +49,12 @@ jobs:
           cd /tmp/sdk
           wget "$SDK_URL" -O sdk.tar.xz
           tar xf sdk.tar.xz
-          sdk_dir=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -n 1)
-          if [ -z "$sdk_dir" ]; then
+          sdk_dirname=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -n 1)
+          if [ -z "$sdk_dirname" ]; then
             echo "SDK directory not found"
             exit 1
           fi
-          sdk_dir="/tmp/sdk/$(basename "$sdk_dir")"
+          sdk_dir="/tmp/sdk/$(basename "$sdk_dirname")"
           if [ ! -x "$sdk_dir/scripts/feeds" ]; then
             echo "Invalid SDK directory structure"
             exit 1
@@ -66,7 +66,7 @@ jobs:
           pkg="${{ github.event.inputs.package_name }}"
           [ -z "$pkg" ] && pkg="luci-app-xlnetacc"
           case "$pkg" in
-            *[!A-Za-z0-9._-]*|"")
+            *[^A-Za-z0-9._-]*|"")
               echo "Invalid package name: $pkg"
               exit 1
               ;;
@@ -101,7 +101,7 @@ jobs:
         run: |
           cd "$SDK_DIR"
           make package/$PKG_NAME/compile -j$(nproc) V=s
-          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -name "$(printf '%s*.ipk' "$PKG_NAME")" -print)
+          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}*.ipk" -print)
           match_count=${#ipk_array[@]}
           if [ "$match_count" -eq 0 ]; then
             echo "IPK not found"
