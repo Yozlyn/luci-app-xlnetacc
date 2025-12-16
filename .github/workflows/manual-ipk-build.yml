@@ -47,7 +47,7 @@ jobs:
             echo "SDK directory not found"
             exit 1
           fi
-          sdk_dir="/tmp/sdk/$sdk_dir"
+          sdk_dir="/tmp/sdk/$(basename "$sdk_dir")"
           if [ ! -x "$sdk_dir/scripts/feeds" ]; then
             echo "Invalid SDK directory structure"
             exit 1
@@ -84,7 +84,7 @@ jobs:
             echo "IPK not found"
             exit 1
           fi
-          match_count=$(echo "$ipk_matches" | wc -l)
+          match_count=$(printf "%s\n" "$ipk_matches" | grep -c .)
           if [ "$match_count" -gt 1 ]; then
             echo "Multiple IPKs found:"
             echo "$ipk_matches"
