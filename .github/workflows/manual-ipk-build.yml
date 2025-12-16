@@ -84,8 +84,8 @@ jobs:
         run: |
           cd "$SDK_DIR"
           mkdir -p "package/$PKG_NAME"
-          EXCLUDES="--exclude .git --exclude .github --exclude .gitignore --exclude '*.swp' --exclude .DS_Store"
-          rsync -a --delete $EXCLUDES "$GITHUB_WORKSPACE/" "package/$PKG_NAME/"
+          EXCLUDES=(--exclude .git --exclude .github --exclude .gitignore --exclude '*.swp' --exclude .DS_Store)
+          rsync -a --delete "${EXCLUDES[@]}" "$GITHUB_WORKSPACE/" "package/$PKG_NAME/"
           echo "CONFIG_PACKAGE_${PKG_NAME}=m" > .config
           make defconfig
 
@@ -93,12 +93,12 @@ jobs:
         run: |
           cd "$SDK_DIR"
           make package/$PKG_NAME/compile -j$(nproc) V=s
-          ipk_matches=$(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}*.ipk")
-          if [ -z "$ipk_matches" ]; then
+          ipk_matches=$(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}*.ipk" -print)
+          match_count=$(find "$SDK_DIR/bin/packages" -name "${PKG_NAME}*.ipk" -print | wc -l)
+          if [ "$match_count" -eq 0 ]; then
             echo "IPK not found"
             exit 1
           fi
-          match_count=$(printf "%s\n" "$ipk_matches" | wc -l)
           if [ "$match_count" -gt 1 ]; then
             echo "Multiple IPKs found:"
             echo "$ipk_matches"
