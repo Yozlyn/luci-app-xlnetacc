@@ -49,7 +49,7 @@ jobs:
           cd /tmp/sdk
           wget "$SDK_URL" -O sdk.tar.xz
           tar xf sdk.tar.xz
-          mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name "openwrt-sdk-*")
+          mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name "openwrt-sdk-*-Linux-*")
           if [ ${#sdk_dirs[@]} -eq 0 ]; then
             echo "SDK directory not found"
             exit 1
@@ -88,6 +88,10 @@ jobs:
         run: |
           cd "$SDK_DIR"
           pkg_dir="package/$PKG_NAME"
+          case "$pkg_dir" in
+            package/*) ;;
+            *) echo "Invalid package path"; exit 1;;
+          esac
           mkdir -p "$pkg_dir"
           EXCLUDES=(
             --exclude .git
@@ -107,7 +111,7 @@ jobs:
         run: |
           cd "$SDK_DIR"
           make package/$PKG_NAME/compile -j$(nproc) V=s
-          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -maxdepth 2 -type f -name "${PKG_NAME}_*.ipk" -print)
+          mapfile -t ipk_array < <(find "$SDK_DIR/bin/packages" -type f -path "$SDK_DIR/bin/packages/*/${PKG_NAME}_*.ipk")
           match_count=${#ipk_array[@]}
           if [ "$match_count" -eq 0 ]; then
             echo "IPK not found"
