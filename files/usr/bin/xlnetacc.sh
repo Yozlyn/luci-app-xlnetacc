@@ -61,16 +61,16 @@ _log() {
 	[ -z "$msg" ] && return
 	[ -z "$flag" ] && flag=1
 
-	[ $logging -eq 0 -a $(( $flag & 1 )) -ne 0 ] && flag=$(( $flag ^ 1 ))
-	if [ $verbose -eq 0 -a $(( $flag & 4 )) -ne 0 ]; then
+	[ $logging -eq 0 ] && [ $(( $flag & 1 )) -ne 0 ] && flag=$(( $flag ^ 1 ))
+	if [ $verbose -eq 0 ] && [ $(( $flag & 4 )) -ne 0 ]; then
 		[ $(( $flag & 1 )) -ne 0 ] && flag=$(( $flag ^ 1 ))
 		[ $(( $flag & 2 )) -ne 0 ] && flag=$(( $flag ^ 2 ))
 	fi
-	if [ $down_acc -eq 0 -a $(( $flag & 8 )) -ne 0 ]; then
+	if [ $down_acc -eq 0 ] && [ $(( $flag & 8 )) -ne 0 ]; then
 		flag=$(( $flag ^ 8 ))
 		[ $up_acc -ne 0 ] && flag=$(( $flag | 16 ))
 	fi
-	if [ $up_acc -eq 0 -a $(( $flag & 16 )) -ne 0 ]; then
+	if [ $up_acc -eq 0 ] && [ $(( $flag & 16 )) -ne 0 ]; then
 		flag=$(( $flag ^ 16 ))
 		[ $down_acc -ne 0 ] && flag=$(( $flag | 8 ))
 	fi
@@ -85,7 +85,7 @@ _log() {
 
 # 清理日志
 clean_log() {
-	[ $logging -eq 1 -a -f "$LOGFILE" ] || return
+	[ $logging -eq 1 ] && [ -f "$LOGFILE" ] || return
 	[ $(wc -l "$LOGFILE" | awk '{print $1}') -le 800 ] && return
 	_log "清理日志文件"
 	local logdata=$(tail -n 500 "$LOGFILE")
@@ -98,7 +98,7 @@ get_bind_ip() {
 	json_cleanup; json_load "$(ubus call network.interface.$network status 2> /dev/null)" >/dev/null 2>&1
 	json_select "ipv4-address" >/dev/null 2>&1; json_select 1 >/dev/null 2>&1
 	json_get_var _bind_ip "address"
-	if [ -z "$_bind_ip" -o "$_bind_ip"x == "0.0.0.0"x ]; then
+	if [ -z "$_bind_ip" ] || [ "$_bind_ip"x == "0.0.0.0"x ]; then
 		_log "获取网络 $network IP地址失败"
 		return 0
 	else
@@ -109,10 +109,17 @@ get_bind_ip() {
 
 # 定义基本 HTTP 命令和参数
 gen_http_cmd() {
-	_http_cmd="wget-ssl -nv -t 1 -T 5 -O - --no-check-certificate"
+	# 根据详细模式决定是否显示 URL 信息
+	if [ $verbose -eq 1 ]; then
+		_http_cmd="wget-ssl -nv -t 1 -T 5 -O - --no-check-certificate -4"
+	else
+		_http_cmd="wget-ssl -q -t 1 -T 5 -O - --no-check-certificate -4"
+	fi
+	
+	_bind_ip=$(echo "$_bind_ip" | tr -d ' \r\n')
+	
 	[ -n "$_bind_ip" ] && _http_cmd="$_http_cmd --bind-address=$_bind_ip"
 }
-
 # 生成设备标识
 gen_device_sign() {
 	local ifname macaddr
@@ -157,7 +164,7 @@ gen_device_sign() {
 
 # 快鸟帐号通用参数
 swjsq_json() {
-	let sequence_xl++
+	sequence_xl=$((sequence_xl + 1))
 	# 生成POST数据
 	json_init
 	json_add_string protocolVersion "$protocolVersion"
@@ -185,7 +192,11 @@ swjsq_get_verify_code() {
 	local key_file="/tmp/xlnetacc_verify_key"
 	local header_file="/tmp/xlnetacc_headers"
 
-	$_http_cmd -S -O "$image_file" "$url" >/dev/null 2> "$header_file"
+	if [ $verbose -eq 1 ]; then
+		$_http_cmd -S -O "$image_file" "$url" 2> "$header_file"
+	else
+		$_http_cmd -S -O "$image_file" "$url" >/dev/null 2> "$header_file"
+	fi
 	local key=$(grep "Set-Cookie:" "$header_file" | grep "VERIFY_KEY" | sed 's/.*VERIFY_KEY=\([^;]*\).*/\1/')
 
 	if [ -n "$key" ]; then
@@ -222,7 +233,7 @@ swjsq_ai_recognize() {
 	    {
 	      "role": "user",
 	      "content": [
-	        { "type": "text", "text": "识别图片中的验证码，仅返回验证码字符，勿添加其他内容。" },
+	         { "type": "text", "text": "识别图片中的验证码，仅返回4位验证码字符，勿添加其他内容。" },
 	        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,$img_base64" } }
 	      ]
 	    }
@@ -282,7 +293,7 @@ swjsq_auto_verify() {
 swjsq_login() {
 	swjsq_json
 	local cookie_args=""
-	if [ -z "$_userid" -o -z "$_loginkey" ]; then
+	if [ -z "$_userid" ] || [ -z "$_loginkey" ]; then
 		access_url='https://mobile-login.xunlei.com/login'
 		json_add_string userName "$username"
 		json_add_string passWord "$password"
@@ -325,62 +336,85 @@ swjsq_login() {
 	esac
 
 	case ${lasterr:=-1} in
-		0)
-			json_get_var _userid "userID"
-			json_get_var _loginkey "loginKey"
-			json_get_var _sessionid "sessionID"
-			_log "_sessionid is $_sessionid" $(( 1 | 4 ))
-			local outmsg="帐号登录成功"; _log "$outmsg" $(( 1 | 8 ))
-			captcha_auto_retry=0
-			rm -f /tmp/xlnetacc_verify.jpg /tmp/xlnetacc_verify_key /tmp/xlnetacc_verify_code 2>/dev/null
-			;;
-		6)
-			local verify_type
-			json_get_var verify_type "verifyType"
-			local outmsg="帐号登录失败。需要输入图形验证码"; _log "$outmsg" $(( 1 | 8 | 32 ))
-			swjsq_get_verify_code "${verify_type:-MEA}"
-			
-			local wait_time=180
-			local code_file="/tmp/xlnetacc_verify_code"
-			rm -f "$code_file"
-			if [ -z "$chatgpt_api_key" ]; then
-				_log "未配置验证码识别 API Key，使用手动输入模式"
-			else
-				swjsq_auto_verify "${verify_type:-MEA}"
-				[ $? -eq 0 ] && return 0
-			fi
+	0)
+		json_get_var _userid "userID"
+		json_get_var _loginkey "loginKey"
+		json_get_var _sessionid "sessionID"
+		_log "_sessionid is $_sessionid" $(( 1 | 4 ))
+		local outmsg="帐号登录成功"; _log "$outmsg" $(( 1 | 8 ))
+		captcha_auto_retry=0
+		rm -f /tmp/xlnetacc_verify.jpg /tmp/xlnetacc_verify_key /tmp/xlnetacc_verify_code 2>/dev/null
+		rm -f "/var/state/xlnetacc_error"
+		;;
+	6)
+		local verify_type
+		json_get_var verify_type "verifyType"
+		local outmsg="帐号登录失败。需要输入图形验证码"
+		swjsq_get_verify_code "${verify_type:-MEA}"
+		
+		local wait_time=180
+		local code_file="/tmp/xlnetacc_verify_code"
+		rm -f "$code_file"
+		if [ -z "$chatgpt_api_key" ]; then
+			_log "未配置验证码识别 API Key，使用手动输入模式"
+		else
+			swjsq_auto_verify "${verify_type:-MEA}"
+			[ $? -eq 0 ] && return 0
+		fi
 
-			_log "请查看 /www/luci-static/resources/xlnetacc_verify.jpg 获取验证码"
-			_log "或打开浏览器访问 http://<路由器IP地址>/luci-static/resources/xlnetacc_verify.jpg"
-			_log "请在 ${wait_time} 秒内将验证码写入 $code_file"
-			_log "命令示例: echo 'abcd' > $code_file"
-			
-			local i=0
-			while [ $i -lt $wait_time ]; do
-				if [ -s "$code_file" ]; then
-					_log "检测到验证码，重试登录..."
-					swjsq_login
-					return $?
-				fi
-				sleep 1
-				let i++
-			done
-			_log "等待验证码超时"
-			return 1
-			;;
-		15) # 身份信息已失效
-			_userid=; _loginkey=;;
-		-1)
-			local outmsg="帐号登录失败。迅雷服务器未响应，请稍候"; _log "$outmsg";;
-		-2)
-			local outmsg="Wget 参数解析错误，请更新 GNU Wget"; _log "$outmsg" $(( 1 | 8 | 32 ));;
-		-3)
-			local outmsg="Wget 网络通信失败，请稍候"; _log "$outmsg";;
-		*)
-			local errorDesc; json_get_var errorDesc "errorDesc"
-			local outmsg="帐号登录失败。错误代码: ${lasterr}"; \
-				[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc"; _log "$outmsg" $(( 1 | 8 | 32 ));;
+		_log "请查看 /www/luci-static/resources/xlnetacc_verify.jpg 获取验证码"
+		_log "或打开浏览器访问 http://<路由器IP地址>/luci-static/resources/xlnetacc_verify.jpg"
+		_log "请在 ${wait_time} 秒内将验证码写入 $code_file"
+		_log "命令示例: echo 'abcd' > $code_file"
+		
+		local i=0
+		while [ $i -lt $wait_time ]; do
+			if [ -s "$code_file" ]; then
+				_log "检测到验证码，重试登录..."
+				swjsq_login
+				return $?
+			fi
+			sleep 1
+			i=$((i + 1))
+		done
+		_log "等待验证码超时"
+		outmsg="等待验证码超时"
+		;;
+	15) # 身份信息已失效
+		_userid=; _loginkey=;
+		outmsg="身份信息已失效，请重新登录"
+		;;
+	28) # 操作频繁
+		outmsg="操作频繁，已停止(如需启动，请终端使用/etc/init.d/xlnetacc start启动)"
+		touch /tmp/xlnetacc_error_28
+		;;
+	-1)
+		outmsg="帐号登录失败。迅雷服务器未响应，请稍候"
+		;;
+	-2)
+		outmsg="Wget 参数解析错误，请更新 GNU Wget"
+		;;
+	-3)
+		outmsg="Wget 网络通信失败，请稍候"
+		;;
+	*)
+		local errorDesc; json_get_var errorDesc "errorDesc"
+		outmsg="帐号登录失败。错误代码: ${lasterr}"; \
+			[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc"
+		;;
+esac
+
+# 统一错误处理：写入错误文件和日志
+if [ $lasterr -ne 0 ]; then
+	# 确定日志标志
+	local log_flag=$(( 1 | 8 | 32 ))
+	case $lasterr in
+		-1|-3) log_flag=$(( 1 )) ;;
 	esac
+	
+	_log "$outmsg" $log_flag
+	echo -n "<font color=red>$outmsg</font>" > "/var/state/xlnetacc_error"
+fi
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
 }
@@ -398,16 +432,29 @@ swjsq_logout() {
 	json_get_var lasterr "errorCode"
 
 	case ${lasterr:=-1} in
-		0)
-			_sessionid=
-			local outmsg="帐号注销成功"; _log "$outmsg" $(( 1 | 8 ));;
-		-1)
-			local outmsg="帐号注销失败。迅雷服务器未响应，请稍候"; _log "$outmsg";;
-		*)
-			local errorDesc; json_get_var errorDesc "errorDesc"
-			local outmsg="帐号注销失败。错误代码: ${lasterr}"; \
-				[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc"; _log "$outmsg" $(( 1 | 8 | 32 ));;
+	0)
+		_sessionid=
+		local outmsg="帐号注销成功"; _log "$outmsg" $(( 1 | 8 ))
+		rm -f "/var/state/xlnetacc_error"
+		;;
+	-1)
+		local outmsg="帐号注销失败。迅雷服务器未响应，请稍候";;
+	*)
+		local errorDesc; json_get_var errorDesc "errorDesc"
+		local outmsg="帐号注销失败。错误代码: ${lasterr}"; \
+			[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc";;
+esac
+
+# 统一错误处理：写入错误文件和日志
+if [ $lasterr -ne 0 ]; then
+	local log_flag=$(( 1 | 8 | 32 ))
+	case $lasterr in
+		-1) log_flag=$(( 1 )) ;;
 	esac
+	
+	_log "$outmsg" $log_flag
+	echo -n "<font color=red>$outmsg</font>" > "/var/state/xlnetacc_error"
+fi
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
 }
@@ -428,47 +475,59 @@ swjsq_getuserinfo() {
 	json_get_var lasterr "errorCode"
 
 	case ${lasterr:=-1} in
-		0)
-			local index=1 can_down=0 vasid isVip isYear expireDate
-			json_select "vipList" >/dev/null 2>&1
-			while : ; do
-				json_select $index >/dev/null 2>&1
-				[ $? -ne 0 ] && break
-				json_get_var vasid "vasid"
-				json_get_var isVip "isVip"
-				json_get_var isYear "isYear"
-				json_get_var expireDate "expireDate"
-				json_select ".." >/dev/null 2>&1
-				let index++
-				case ${vasid:-0} in
-					2) [ $down_acc -ne 0 ] && outmsg="迅雷超级会员" || continue;;
-					$vasid_down) outmsg="迅雷快鸟会员";;
-					$vasid_up) outmsg="上行提速会员";;
-					*) continue;;
-				esac
-				if [ ${isVip:-0} -eq 1 -o ${isYear:-0} -eq 1 ]; then
-					outmsg="${outmsg}有效。会员到期时间：${expireDate:0:4}-${expireDate:4:2}-${expireDate:6:2}"
-					[ $vasid -eq $vasid_up ] && _log "$outmsg" $(( 1 | 16 )) || _log "$outmsg" $(( 1 | 8 ))
-					[ $vasid -ne $vasid_up ] && can_down=$(( $can_down | 1 ))
+	0)
+		local index=1 can_down=0 vasid isVip isYear expireDate
+		json_select "vipList" >/dev/null 2>&1
+		while : ; do
+			json_select $index >/dev/null 2>&1
+			[ $? -ne 0 ] && break
+			json_get_var vasid "vasid"
+			json_get_var isVip "isVip"
+			json_get_var isYear "isYear"
+			json_get_var expireDate "expireDate"
+			json_select ".." >/dev/null 2>&1
+			index=$((index + 1))
+			case ${vasid:-0} in
+				2) [ $down_acc -ne 0 ] && outmsg="迅雷超级会员" || continue;;
+				$vasid_down) outmsg="迅雷快鸟会员";;
+				$vasid_up) outmsg="上行提速会员";;
+				*) continue;;
+			esac
+			if [ ${isVip:-0} -eq 1 ] || [ ${isYear:-0} -eq 1 ]; then
+				outmsg="${outmsg}有效。会员到期时间：${expireDate:0:4}-${expireDate:4:2}-${expireDate:6:2}"
+				[ $vasid -eq $vasid_up ] && _log "$outmsg" $(( 1 | 16 )) || _log "$outmsg" $(( 1 | 8 ))
+				[ $vasid -ne $vasid_up ] && can_down=$(( $can_down | 1 ))
+			else
+				if [ ${#expireDate} -ge 8 ]; then
+					outmsg="${outmsg}已到期。会员到期时间：${expireDate:0:4}-${expireDate:4:2}-${expireDate:6:2}"
 				else
-					if [ ${#expireDate} -ge 8 ]; then
-						outmsg="${outmsg}已到期。会员到期时间：${expireDate:0:4}-${expireDate:4:2}-${expireDate:6:2}"
-					else
-						outmsg="${outmsg}无效"
-					fi
-					[ $vasid -eq $vasid_up ] && _log "$outmsg" $(( 1 | 16 | 32 )) || _log "$outmsg" $(( 1 | 8 | 32 ))
-					[ $vasid -eq $vasid_up ] && up_acc=0
+					outmsg="${outmsg}无效"
 				fi
-			done
-			[ $can_down -eq 0 ] && down_acc=0
-			;;
-		-1)
-			outmsg="获取迅雷会员信息失败。迅雷服务器未响应，请稍候"; _log "$outmsg";;
-		*)
-			local errorDesc; json_get_var errorDesc "errorDesc"
-			outmsg="获取迅雷会员信息失败。错误代码: ${lasterr}"; \
-				[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc"; _log "$outmsg" $(( 1 | 8 | 32 ));;
+				[ $vasid -eq $vasid_up ] && _log "$outmsg" $(( 1 | 16 | 32 )) || _log "$outmsg" $(( 1 | 8 | 32 ))
+				[ $vasid -eq $vasid_up ] && up_acc=0
+			fi
+		done
+		[ $can_down -eq 0 ] && down_acc=0
+		rm -f "/var/state/xlnetacc_error"
+		;;
+	-1)
+		outmsg="获取迅雷会员信息失败。迅雷服务器未响应，请稍候";;
+	*)
+		local errorDesc; json_get_var errorDesc "errorDesc"
+		outmsg="获取迅雷会员信息失败。错误代码: ${lasterr}"; \
+			[ -n "$errorDesc" ] && outmsg="${outmsg}，原因: $errorDesc";;
+esac
+
+# 统一错误处理：写入错误文件和日志
+if [ $lasterr -ne 0 ]; then
+	local log_flag=$(( 1 | 8 | 32 ))
+	case $lasterr in
+		-1) log_flag=$(( 1 )) ;;
 	esac
+	
+	_log "$outmsg" $log_flag
+	echo -n "<font color=red>$outmsg</font>" > "/var/state/xlnetacc_error"
+fi
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
 }
@@ -691,7 +750,7 @@ isp_recover() {
 	[ $lasterr -eq 0 ] && return 0 || return 1
 }
 
-# 查询提速信息，未使用
+# 查询提速信息
 isp_query() {
 	xlnetacc_var $1
 
@@ -706,13 +765,13 @@ isp_query() {
 # 设置参数变量
 xlnetacc_var() {
 	if [ $1 -eq 1 ]; then
-		let sequence_down++
+		sequence_down=$((sequence_down + 1))
 		access_url=$_portal_down
 		http_args="sequence=${sequence_down}&client_type=${client_type_down}-${clientVersion}&client_version=${client_type_down//-/}-${clientVersion}&chanel=umeng-10900011&time_and=$(date +%s)000"
 		user_agent=$agent_down
 		link_cn="下行"
 	else
-		let sequence_up++
+		sequence_up=$((sequence_up + 1))
 		access_url=$_portal_up
 		http_args="sequence=${sequence_up}&client_type=${client_type_up}-${clientVersion}&client_version=${client_type_up//-/}-${clientVersion}"
 		user_agent=$agent_down
@@ -724,16 +783,16 @@ xlnetacc_var() {
 
 # 重试循环
 xlnetacc_retry() {
-	if [ $# -ge 3 -a $3 -ne 0 ]; then
-		[ $2 -eq 1 -a $down_acc -ne $3 ] && return 0
-		[ $2 -eq 2 -a $up_acc -ne $3 ] && return 0
+	if [ $# -ge 3 ] && [ $3 -ne 0 ]; then
+		[ $2 -eq 1 ] && [ $down_acc -ne $3 ] && return 0
+		[ $2 -eq 2 ] && [ $up_acc -ne $3 ] && return 0
 	fi
 
 	local retry=1
 	while : ; do
 		lasterr=
 		eval $1 $2 && break # 成功
-		[ $# -ge 4 -a $retry -ge $4 ] && break || let retry++ # 重试超时
+		[ $# -ge 4 ] && [ $retry -ge $4 ] && break || retry=$((retry + 1)) # 重试超时
 		case $lasterr in
 			-1) sleep 5s;; # 服务器未响应
 			-2) break;; # 严重错误
@@ -752,7 +811,8 @@ xlnetacc_logout() {
 	xlnetacc_retry 'isp_recover' 1 2 $retry
 	xlnetacc_retry 'isp_recover' 2 2 $retry
 	xlnetacc_retry 'swjsq_logout' 0 0 $retry
-	[ $down_acc -ne 0 ] && down_acc=1; [ $up_acc -ne 0 ] && up_acc=1
+	[ $down_acc -ne 0 ] && down_acc=1
+	[ $up_acc -ne 0 ] && up_acc=1
 	_sessionid=; _dial_account=
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
@@ -760,9 +820,19 @@ xlnetacc_logout() {
 
 # 中止信号处理
 sigterm() {
-	_log "trap sigterm, exit" $(( 1 | 4 ))
+	_log "迅雷快鸟正在停止..." $(( 1 | 2 ))
 	xlnetacc_logout
-	rm -f "$down_state_file" "$up_state_file"
+	
+	# 检查是否是状态码28的错误情况
+	if [ -f /tmp/xlnetacc_error_28 ]; then
+		rm -f "$down_state_file" "$up_state_file"
+		rm -f /tmp/xlnetacc_error_28
+	else
+		rm -f "$down_state_file" "$up_state_file" "/var/state/xlnetacc_error"
+	fi
+	
+	rm -f /tmp/xlnetacc_started  # 清理启动标志
+	_log "迅雷快鸟已停止" $(( 1 | 2 ))
 	exit 0
 }
 
@@ -796,20 +866,33 @@ xlnetacc_init() {
 	[ -z "$chatgpt_base_url" ] && chatgpt_base_url="https://openrouter.ai/api/v1"
 	[ -z "$chatgpt_model" ] && chatgpt_model="google/gemini-2.0-flash-exp:free"
 	local enabled=$(uci_get_by_bool "general" "enabled" 0)
-	([ $enabled -eq 0 ] || [ $down_acc -eq 0 -a $up_acc -eq 0 ] || [ -z "$username" -o -z "$password" -o -z "$network" ]) && return 2
-	([ -z "$keepalive" -o -n "${keepalive//[0-9]/}" ] || [ $keepalive -lt 5 -o $keepalive -gt 60 ]) && keepalive=10
+	([ $enabled -eq 0 ] || [ $down_acc -eq 0 ] && [ $up_acc -eq 0 ] || [ -z "$username" ] || [ -z "$password" ] || [ -z "$network" ]) && return 2
+	([ -z "$keepalive" ] || [ -n "${keepalive//[0-9]/}" ] || [ $keepalive -lt 5 ] || [ $keepalive -gt 60 ]) && keepalive=10
 	readonly keepalive=$(( $keepalive ))
-	([ -z "$relogin" -o -n "${relogin//[0-9]/}" ] || [ $relogin -gt 48 ]) && relogin=0
+	([ -z "$relogin" ] || [ -n "${relogin//[0-9]/}" ] || [ $relogin -gt 48 ]) && relogin=0
 	readonly relogin=$(( $relogin * 60 * 60 ))
 
 	[ $logging -eq 1 ] && [ ! -d /var/log ] && mkdir -p /var/log
 	[ -f "$LOGFILE" ] && _log "------------------------------"
-	_log "迅雷快鸟正在启动..."
+	
+	# 检查是否是首次启动（用于控制系统日志输出）
+	local first_start=0
+	if [ ! -f /tmp/xlnetacc_started ]; then
+		first_start=1
+		touch /tmp/xlnetacc_started
+	fi
+	
+	# 只在首次启动时输出到系统日志，后续重试只记录到文件
+	if [ $first_start -eq 1 ]; then
+		_log "迅雷快鸟正在启动..." $(( 1 | 2 ))
+	else
+		_log "迅雷快鸟正在重新初始化..." 1
+	fi
 
 	# 检查外部调用工具
-	command -v wget-ssl >/dev/null || { _log "GNU Wget 未安装"; return 3; }
+	command -v wget-ssl >/dev/null || { _log "GNU Wget 未安装" $(( 1 | 2 )); return 3; }
 	local opensslchk=$(echo -n 'openssl' | openssl dgst -sha1 | awk '{print $2}')
-	[ "$opensslchk" != 'c898fa1e7226427010e329971e82c669f8d8abb4' ] && { _log "openssl-util 未安装或计算错误"; return 3; }
+	[ "$opensslchk" != 'c898fa1e7226427010e329971e82c669f8d8abb4' ] && { _log "openssl-util 未安装或计算错误" $(( 1 | 2 )); return 3; }
 
 	# 捕获中止信号
 	trap 'sigterm' INT # Ctrl-C
@@ -818,11 +901,18 @@ xlnetacc_init() {
 
 	# 生成设备标识
 	gen_device_sign
-	[ ${#_peerid} -ne 16 -o ${#_devicesign} -ne 71 ] && return 4
+	([ ${#_peerid} -ne 16 ] || [ ${#_devicesign} -ne 71 ]) && return 4
 
 	clean_log
 	[ -d /var/state ] || mkdir -p /var/state
-	rm -f "$down_state_file" "$up_state_file"
+	rm -f "$down_state_file" "$up_state_file" "/var/state/xlnetacc_error"
+	
+	# 只在首次启动时输出到系统日志
+	if [ $first_start -eq 1 ]; then
+		_log "迅雷快鸟初始化完成，开始运行" $(( 1 | 2 ))
+	else
+		_log "重新初始化完成" 1
+	fi
 	return 0
 }
 
@@ -848,13 +938,14 @@ xlnetacc_main() {
 				6) sleep 130m;; # 需要输入验证码
 				8) sleep 3m;; # 服务器系统维护
 				15) sleep 1s;; # 身份信息已失效
+				28) /etc/init.d/xlnetacc stop;;
 				*) return 5;; # 登录失败
 			esac
 		done
 
 		# 获取用户信息
 		xlnetacc_retry 'swjsq_getuserinfo'
-		[ $down_acc -eq 0 -a $up_acc -eq 0 ] && break
+		[ $down_acc -eq 0 ] && [ $up_acc -eq 0 ] && break
 		# 登录时间更新
 		xlnetacc_retry 'swjsq_renewal'
 		# 获取提速入口
@@ -863,7 +954,7 @@ xlnetacc_main() {
 		# 获取带宽信息
 		xlnetacc_retry 'isp_bandwidth' 1 1 10 || { sleep 3m; continue; }
 		xlnetacc_retry 'isp_bandwidth' 2 1 10 || { sleep 3m; continue; }
-		[ $down_acc -eq 0 -a $up_acc -eq 0 ] && break
+		[ $down_acc -eq 0 ] && [ $up_acc -eq 0 ] && break
 		# 带宽提速
 		xlnetacc_retry 'isp_upgrade' 1 1 10 || { sleep 3m; continue; }
 		xlnetacc_retry 'isp_upgrade' 2 1 10 || { sleep 3m; continue; }
@@ -873,15 +964,25 @@ xlnetacc_main() {
 		while : ; do
 			clean_log # 清理日志
 			sleep ${keepalive}m
-			[ $relogin -ne 0 -a $(( $(date +%s) - $timer )) -ge $relogin ] && break # 登录超时
+			[ $relogin -ne 0 ] && [ $(( $(date +%s) - $timer )) -ge $relogin ] && break # 登录超时
 			xlnetacc_retry 'isp_keepalive' 1 2 5 || break
 			xlnetacc_retry 'isp_keepalive' 2 2 5 || break
 		done
 	done
 	xlnetacc_logout
-	_log "无法提速，迅雷快鸟已停止。"
+	rm -f /tmp/xlnetacc_started  # 清理启动标志
+	_log "无法提速，迅雷快鸟已停止。" $(( 1 | 2 ))
 	return 6
 }
+
+# 处理停止命令
+if [ "$1" = "--stop" ]; then
+	# 仅输出到系统日志，不输出到文件
+	logger -p "daemon.info" -t "xlnetacc" "收到停止命令"
+	# 清理启动标志
+	rm -f /tmp/xlnetacc_started
+	exit 0
+fi
 
 # 程序入口
 xlnetacc_init "$@" && xlnetacc_main
