@@ -35,6 +35,7 @@ captcha_auto_retry=0
 sequence_xl=1000000
 sequence_down=$(( $(date +%s) / 6 ))
 sequence_up=$sequence_down
+LAST_HEARTBEAT_CORE=
 
 # 包含用于解析 JSON 格式返回值的函数
 . /usr/share/libubox/jshn.sh
@@ -60,6 +61,22 @@ _log() {
 	local msg=$1 flag=$2 timestamp=$(date +'%Y/%m/%d %H:%M:%S')
 	[ -z "$msg" ] && return
 	[ -z "$flag" ] && flag=1
+	
+	# 心跳日志过滤：相同心跳内容只输出第一次
+	local is_heartbeat=0
+	local heartbeat_core=""
+	if echo "$msg" | grep -q "心跳信号返回正常"; then
+		is_heartbeat=1
+		heartbeat_core=$(echo "$msg" | grep -o ".*心跳信号返回正常")
+		
+		if [ "$heartbeat_core" = "$LAST_HEARTBEAT_CORE" ]; then
+			flag=$((flag & ~1))
+		else
+			LAST_HEARTBEAT_CORE="$heartbeat_core"
+		fi
+	else
+		LAST_HEARTBEAT_CORE=""
+	fi
 
 	[ $logging -eq 0 ] && [ $(( $flag & 1 )) -ne 0 ] && flag=$(( $flag ^ 1 ))
 	if [ $verbose -eq 0 ] && [ $(( $flag & 4 )) -ne 0 ]; then
@@ -86,9 +103,9 @@ _log() {
 # 清理日志
 clean_log() {
 	[ $logging -eq 1 ] && [ -f "$LOGFILE" ] || return
-	[ $(wc -l "$LOGFILE" | awk '{print $1}') -le 800 ] && return
+	[ $(wc -l "$LOGFILE" | awk '{print $1}') -le 400 ] && return
 	_log "清理日志文件"
-	local logdata=$(tail -n 500 "$LOGFILE")
+	local logdata=$(tail -n 300 "$LOGFILE")
 	echo "$logdata" > $LOGFILE 2> /dev/null
 	unset logdata
 }
