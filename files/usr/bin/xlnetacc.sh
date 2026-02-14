@@ -998,6 +998,9 @@ if [ "$1" = "--stop" ]; then
 	logger -p "daemon.info" -t "xlnetacc" "收到停止命令"
 	# 清理启动标志
 	rm -f /tmp/xlnetacc_started
+	# 清理状态文件，确保网页显示正确
+	rm -f /var/state/xlnetacc_down_state
+	rm -f /var/state/xlnetacc_up_state
 	exit 0
 fi
 
