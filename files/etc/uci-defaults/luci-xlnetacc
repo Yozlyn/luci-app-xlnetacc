@@ -18,5 +18,29 @@ if [ "$general"x != "general"x ]; then
 	EOF
 fi
 
+# 配置项列表
+config_options="enabled:0 down_acc:0 up_acc:0 logging:1 verbose:0 network:wan keepalive:10 relogin:0 account: password: base_url:https://openrouter.ai/api/v1 api_key: model:google/gemini-2.0-flash-exp:free"
+
+# 检查并设置配置项
+need_commit=0
+uci_batch=""
+
+for option in $config_options; do
+	key="${option%%:*}"
+	value="${option#*:}"
+	
+	if ! uci -q get xlnetacc.@general[-1].$key >/dev/null 2>&1; then
+		uci_batch="${uci_batch}	set xlnetacc.@general[-1].$key='$value'
+"
+		need_commit=1
+	fi
+done
+
+if [ $need_commit -eq 1 ]; then
+	uci -q batch <<-EOF >/dev/null
+$uci_batch	commit xlnetacc
+	EOF
+fi
+
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 exit 0
