@@ -62,7 +62,7 @@ _log() {
 	[ -z "$msg" ] && return
 	[ -z "$flag" ] && flag=1
 	
-	# 心跳日志过滤：相同心跳内容只输出第一次
+	# 心跳日志过滤：相同心跳输出第一次
 	local is_heartbeat=0
 	local heartbeat_core=""
 	if echo "$msg" | grep -q "心跳信号返回正常"; then
@@ -830,7 +830,7 @@ xlnetacc_logout() {
 	[ $up_acc -ne 0 ] && up_acc=1
 	_sessionid=; _dial_account=
 	
-	# 清空心跳记录，重新登录后需要重新输出心跳状态
+	# 重新登录后需要重新输出心跳状态
 	LAST_HEARTBEAT_CORE=
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
@@ -838,19 +838,18 @@ xlnetacc_logout() {
 
 # 中止信号处理
 sigterm() {
-	_log "迅雷快鸟正在停止..." $(( 1 | 2 ))
-	xlnetacc_logout
+	logger -p "daemon.info" -t "xlnetacc" "迅雷快鸟正在停止..."
 	
-	# 检查是否是状态码28的错误情况
 	if [ -f /tmp/xlnetacc_error_28 ]; then
-		rm -f "$down_state_file" "$up_state_file"
-		rm -f /tmp/xlnetacc_error_28
+		rm -f /var/state/xlnetacc_down_state /var/state/xlnetacc_up_state 2>/dev/null
+		rm -f /tmp/xlnetacc_error_28 2>/dev/null
 	else
-		rm -f "$down_state_file" "$up_state_file" "/var/state/xlnetacc_error"
+		rm -f /var/state/xlnetacc_down_state /var/state/xlnetacc_up_state /var/state/xlnetacc_error 2>/dev/null
 	fi
 	
-	rm -f /tmp/xlnetacc_started  # 清理启动标志
-	_log "迅雷快鸟已停止" $(( 1 | 2 ))
+	rm -f /tmp/xlnetacc_started 2>/dev/null  # 清理启动标志
+	
+	logger -p "daemon.info" -t "xlnetacc" "迅雷快鸟已停止"
 	exit 0
 }
 
@@ -900,7 +899,7 @@ xlnetacc_init() {
 		touch /tmp/xlnetacc_started
 	fi
 	
-	# 只在首次启动时输出到系统日志，后续重试只记录到文件
+	# 只在首次启动时输出到系统日志
 	if [ $first_start -eq 1 ]; then
 		_log "迅雷快鸟正在启动..." $(( 1 | 2 ))
 	else
@@ -924,13 +923,6 @@ xlnetacc_init() {
 	clean_log
 	[ -d /var/state ] || mkdir -p /var/state
 	rm -f "$down_state_file" "$up_state_file" "/var/state/xlnetacc_error"
-	
-	# 只在首次启动时输出到系统日志
-	if [ $first_start -eq 1 ]; then
-		_log "迅雷快鸟初始化完成，开始运行" $(( 1 | 2 ))
-	else
-		_log "重新初始化完成" 1
-	fi
 	return 0
 }
 
@@ -995,14 +987,7 @@ xlnetacc_main() {
 
 # 处理停止命令
 if [ "$1" = "--stop" ]; then
-	# 仅输出到系统日志，不输出到文件
-	logger -p "daemon.info" -t "xlnetacc" "收到停止命令"
-	# 清理启动标志
-	rm -f /tmp/xlnetacc_started
-	# 清理状态文件，确保网页显示正确
-	rm -f /var/state/xlnetacc_down_state
-	rm -f /var/state/xlnetacc_up_state
-	exit 0
+	sigterm
 fi
 
 # 程序入口

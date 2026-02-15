@@ -29,6 +29,7 @@ start_service() {
 
 stop_service() {
 	"$PROG" --stop
+	sleep 3
 }
 
 service_triggers() {
