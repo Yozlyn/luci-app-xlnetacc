@@ -27,12 +27,12 @@ function action_status()
 	local run_state
 	
 	if error_content ~= "" then
-		run_state = error_content
+		run_state = '<font color="red">' .. error_content .. '</font>'
 	else
 		if is_running("xlnetacc.sh") then
-			run_state = "运行中"
+			run_state = '<font color="green">运行中</font>'
 		else
-			run_state = "已停止"
+			run_state = '<font color="red">已停止</font>'
 		end
 	end
 	

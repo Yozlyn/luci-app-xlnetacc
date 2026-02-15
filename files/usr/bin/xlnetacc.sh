@@ -74,8 +74,6 @@ _log() {
 		else
 			LAST_HEARTBEAT_CORE="$heartbeat_core"
 		fi
-	else
-		LAST_HEARTBEAT_CORE=""
 	fi
 
 	[ $logging -eq 0 ] && [ $(( $flag & 1 )) -ne 0 ] && flag=$(( $flag ^ 1 ))
@@ -831,6 +829,9 @@ xlnetacc_logout() {
 	[ $down_acc -ne 0 ] && down_acc=1
 	[ $up_acc -ne 0 ] && up_acc=1
 	_sessionid=; _dial_account=
+	
+	# 清空心跳记录，重新登录后需要重新输出心跳状态
+	LAST_HEARTBEAT_CORE=
 
 	[ $lasterr -eq 0 ] && return 0 || return 1
 }
